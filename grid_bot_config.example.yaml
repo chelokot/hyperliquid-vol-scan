@@ -1,0 +1,17 @@
+mode: paper
+base_url: https://api.hyperliquid.xyz
+account_address: ""
+secret_key_env: HYPERLIQUID_SECRET_KEY
+
+coin: BTC
+leverage: 40
+cross_margin: true
+grid_step_pct: 5.0
+order_notional_usd: 25.0
+max_abs_position_usd: 250.0
+max_levels_from_anchor: 8
+max_spread_pct: 0.02
+
+poll_interval_sec: 5.0
+state_path: out/btc_grid_bot_state.json
+events_path: out/btc_grid_bot_events.jsonl

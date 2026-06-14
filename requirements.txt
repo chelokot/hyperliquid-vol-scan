@@ -1,0 +1,7 @@
+eth-account>=0.13
+hyperliquid-python-sdk>=0.24
+pydantic>=2
+PyYAML>=6
+requests>=2
+numpy>=2
+pandas>=3

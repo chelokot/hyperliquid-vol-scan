@@ -1,0 +1,16 @@
+account_address: "0xYOUR_MAIN_ACCOUNT_ADDRESS"
+symbols: ["cash:HOOD", "cash:NVDA", "cash:TSLA", "cash:META", "cash:GOOGL", "cash:AMZN", "cash:MSFT", "xyz:ARM", "xyz:MSTR", "xyz:PLTR"]
+leverage:
+  "cash:HOOD": 10
+  "cash:NVDA": 20
+  "cash:TSLA": 20
+  "cash:META": 20
+  "cash:GOOGL": 20
+  "cash:AMZN": 20
+  "cash:MSFT": 20
+  "xyz:ARM": 10
+  "xyz:MSTR": 10
+  "xyz:PLTR": 10
+budget_safety: 0.9
+rebalance_fraction: 0.34
+min_order_notional_usd: 11.0
