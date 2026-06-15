@@ -62,7 +62,8 @@ a property of HL's stock-perp design, not of the model.
 - **Features** (`rl_research/features_v2.py`): one causal, leak-free function
   `compute_features(...)` is the **single source of truth** used by *both* the
   backtest and the live engine — verified byte-identical, so they cannot drift.
-  57 features: perp/stock return ladders, premium + multi-scale premium z-scores,
+  66 features (35 market signals + a per-pair one-hot over 31 pairs): perp/stock
+  return ladders, premium + multi-scale premium z-scores,
   premium volatility, mean-reversion "stretch", premium range-position, realized
   vols, order-flow imbalance, print counts, stock staleness, VWAP deviation,
   session fraction, and a per-pair one-hot.
@@ -89,11 +90,15 @@ and honest costs, the production ensemble backtests at roughly:
 
 | metric | value |
 |---|---|
-| per-day return, all pairs | **~+1.6%/day** |
-| per-day return, top-8 by validation | **~+2.4%/day** |
-| worst test day | positive |
+| per-day return, all 31 pairs | **~+1.84%/day** |
+| per-day return, top-8 by validation | **~+3.1%/day** |
+| worst test day | positive (~+0.7%) |
 | positive test days | 11/11 |
 | val correlation (q50 vs forward) | ~0.18 |
+
+(5-seed decision-level ensemble; stocks listing on both `cash` and `xyz` dexes
+are kept as distinct pairs, which improved the all-pairs return ~+13% and the
+top-8 ~+27% over the single-dex set by diversification + per-book optionality.)
 
 **These numbers are real but must be read with the caveats below — they are NOT a
 promise of live returns.**
