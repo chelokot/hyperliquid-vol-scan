@@ -224,18 +224,23 @@ class LiveEngine:
 
     async def _stock_loop(self) -> None:
         url = f"{FINNHUB_WS}?token={self.finnhub_key}"
+        # Finnhub uses the bare ticker (INTC); our keys are dex-qualified (cash:INTC).
+        # One stock can back several pairs (cash:INTC + xyz:INTC) -> route to all.
+        stock_map: dict[str, list[str]] = {}
+        for s in self.symbols:
+            stock_map.setdefault(s.split(":")[-1], []).append(s)
         while True:
             try:
                 async with websockets.connect(url) as ws:
-                    for symbol in self.symbols:
-                        await ws.send(json.dumps({"type": "subscribe", "symbol": symbol}))
+                    for ticker in stock_map:
+                        await ws.send(json.dumps({"type": "subscribe", "symbol": ticker}))
                     async for raw in ws:
                         message = json.loads(raw)
                         if message.get("type") != "trade":
                             continue
                         for trade in message["data"]:
-                            if trade["s"] in self.bars:
-                                self.bars[trade["s"]].on_stock_trade(float(trade["p"]))
+                            for sym in stock_map.get(trade["s"], ()):
+                                self.bars[sym].on_stock_trade(float(trade["p"]))
             except Exception as exc:
                 self.emit({"type": "stock_feed_error", "error": str(exc)})
                 await asyncio.sleep(3)
