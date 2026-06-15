@@ -11,7 +11,7 @@ from features_v2 import FEATURE_NAMES, OUT_DIR, SYMBOLS, WARMUP, build_episode, 
 QUANTILES = np.array([0.1, 0.25, 0.5, 0.75, 0.9])
 FORWARD_SECONDS = 60
 TRAIN_STRIDE = 10
-TAKER_FEE_BPS = 1.0
+TAKER_FEE_BPS = 4.5  # real HL taker (userCrossRate 0.045%); ~4.32 after 4% referral, kept conservative
 EXTRA_BPS = 0.5
 DELAY = 1
 

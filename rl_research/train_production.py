@@ -144,7 +144,7 @@ def main() -> None:
         preds = member.inplace_predict(val_x)
         single_corrs.append(float(np.corrcoef(preds[:, 2], val_y)[0, 1]))
         best_scale, best = 0.5, -1e18
-        for scale in (0.25, 0.35, 0.5, 1.0, 1.5, 2.5):
+        for scale in (0.5, 1.0, 1.5, 2.5, 4.0, 6.0):
             r = portfolio_report(member, val_episodes, costs, scale, "v")["mean_day_pct"]
             if r > best:
                 best, best_scale = r, scale
@@ -153,7 +153,7 @@ def main() -> None:
 
     ens_corr = float(np.corrcoef(EnsembleQuantiles(members).inplace_predict(val_x)[:, 2], val_y)[0, 1])
     best_scale, best = 0.25, -1e18
-    for scale in (0.25, 0.35, 0.5, 1.0, 1.5, 2.5):
+    for scale in (0.5, 1.0, 1.5, 2.5, 4.0, 6.0):
         r = ensemble_portfolio(members, val_episodes, costs, scale)["mean_day_pct"]
         if r > best:
             best, best_scale = r, scale
