@@ -282,6 +282,19 @@ class LiveEngine:
         except Exception as exc:
             self.emit({"type": "hotswap_error", "error": str(exc)})
 
+    def record_metric(self) -> None:
+        equity = sum(self.last_dex_equity.values()) if self.last_dex_equity else 0.0
+        syms = {}
+        for s in self.symbols:
+            perp, stock = self.bars[s].perp_last, self.bars[s].stock_last
+            syms[s] = {
+                "pred": round(self.last_pred.get(s, 0.0), 3),
+                "prem": round((stock / perp - 1) * 100, 4) if (perp and stock) else None,
+                "szi": round(self.local_szi[s], 6),
+                "target": round(self.last_target.get(s, 0.0), 3),
+            }
+        self.store.record_metric({"equity": round(equity, 2), "syms": syms})
+
     def record_state(self, second: int, in_session: bool) -> None:
         self.store.record_state({
             "second": second, "in_session": in_session, "live": self.live,
@@ -317,6 +330,7 @@ class LiveEngine:
         last_second = -1
         last_account_refresh = 0.0
         last_hotswap = time.time()
+        last_metric = 0.0
         flattened = False
         while True:
             poll_start = time.time()
@@ -365,6 +379,9 @@ class LiveEngine:
                 last_hotswap = poll_start
 
             self.record_state(second, in_session)
+            if poll_start - last_metric >= 20:
+                self.record_metric()
+                last_metric = poll_start
             time.sleep(max(0.0, POLL_INTERVAL - (time.time() - poll_start)))
 
 

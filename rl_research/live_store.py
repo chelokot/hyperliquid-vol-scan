@@ -9,10 +9,10 @@ import json
 import sqlite3
 import threading
 import time
+from pathlib import Path
 
-from features_v2 import OUT_DIR
-
-DB_PATH = OUT_DIR / "live_store.db"
+# stdlib-only (no numpy/torch) so the dashboard can run as a lightweight host unit
+DB_PATH = Path(__file__).resolve().parents[1] / "out" / "rl_research" / "live_store.db"
 
 
 class LiveStore:
@@ -31,6 +31,7 @@ class LiveStore:
               ts_ms INTEGER, symbol TEXT, side TEXT, size REAL, price REAL,
               target REAL, notional REAL, kind TEXT, live INTEGER, result TEXT);
             CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY CHECK(id=1), ts_ms INTEGER, payload TEXT);
+            CREATE TABLE IF NOT EXISTS metrics(ts_ms INTEGER PRIMARY KEY, payload TEXT);
             CREATE TABLE IF NOT EXISTS models(ts_ms INTEGER, path TEXT, summary TEXT);
             """
         )
@@ -90,6 +91,22 @@ class LiveStore:
         data = json.loads(row[1])
         data["ts_ms"] = row[0]
         return data
+
+    # ---- metrics time-series (charts) ----
+    def record_metric(self, payload: dict) -> None:
+        c = self._conn()
+        c.execute("INSERT OR REPLACE INTO metrics VALUES(?,?)", (int(time.time() * 1000), json.dumps(payload)))
+        c.commit()
+
+    def load_metrics(self, limit=720):
+        cur = self._conn().execute("SELECT ts_ms, payload FROM metrics ORDER BY ts_ms DESC LIMIT ?", (limit,))
+        rows = cur.fetchall()
+        out = []
+        for ts, payload in reversed(rows):
+            d = json.loads(payload)
+            d["ts_ms"] = ts
+            out.append(d)
+        return out
 
     # ---- models ----
     def record_model(self, path, summary) -> None:
