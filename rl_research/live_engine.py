@@ -112,7 +112,8 @@ class Ensemble:
 class LiveEngine:
     def __init__(self, config: EngineConfig, live: bool) -> None:
         self.config = config
-        self.live = live
+        self.live = False          # always start dry; going live is a control-plane toggle
+        self._init_live = bool(live)
         self.symbols = config.symbols
         self.coin = {s: PAIRS[s] for s in self.symbols}
         self.dex = {s: PAIRS[s].split(":")[0] for s in self.symbols}
@@ -296,7 +297,7 @@ class LiveEngine:
 
     # ---- live control from the dashboard (via the store) ----
     def default_control(self) -> dict:
-        return {"paused": False, "flatten": [], "symbols": {
+        return {"paused": False, "live": self._init_live, "flatten": [], "symbols": {
             s: {"enabled": self.enabled[s], "leverage": self.leverage_live[s], "weight": self.weight[s]} for s in self.symbols}}
 
     def apply_control(self) -> None:
@@ -304,6 +305,18 @@ class LiveEngine:
         if not ctrl:
             self.store.set_control(self.default_control())
             return
+        prev_live = self.live
+        self.live = bool(ctrl.get("live", False))
+        if self.live and not prev_live:  # dry -> live: set leverage on the enabled set
+            self.emit({"type": "went_live"})
+            for s in self.symbols:
+                if self.enabled[s]:
+                    try:
+                        self.exchange.update_leverage(self.leverage_live[s], self.coin[s], is_cross=True)
+                    except Exception as exc:
+                        self.emit({"type": "leverage_error", "symbol": s, "error": str(exc)})
+        elif prev_live and not self.live:
+            self.emit({"type": "went_dry"})
         self.paused = bool(ctrl.get("paused", False))
         for s in self.symbols:
             cs = (ctrl.get("symbols") or {}).get(s)
@@ -384,12 +397,6 @@ class LiveEngine:
         self.apply_control()
         self.refresh_account()
         self.warmup_from_store()
-        if self.live:
-            for symbol in self.symbols:
-                try:
-                    self.exchange.update_leverage(self.config.leverage[symbol], self.coin[symbol], is_cross=True)
-                except Exception as exc:
-                    self.emit({"type": "leverage_error", "symbol": symbol, "requested": self.config.leverage[symbol], "error": str(exc)})
         self.start_perp_feed()
         self.start_stock_feed()
         self.emit({"type": "started", "live": self.live, "symbols": self.symbols, "enter_scale": self.enter_scale, "poll": POLL_INTERVAL})

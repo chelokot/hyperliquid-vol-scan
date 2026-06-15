@@ -73,7 +73,7 @@ input[type=range]{width:90px;vertical-align:middle;accent-color:var(--blu)}
 <header>
  <h1><span class=dot>◆</span> HL live</h1>
  <span id=mode class=pill></span><span id=sess class=pill></span>
- <button id=pause></button><button class=btn-flat id=flatall>⏹ закрыть всё</button>
+ <button id=golive></button><button id=pause></button><button class=btn-flat id=flatall>⏹ закрыть всё</button>
  <span class=grow></span><span class=age id=clock></span>
 </header>
 <main>
@@ -129,6 +129,7 @@ async function refresh(){
  if(!s){$('clock').textContent='движок не запущен';$('hero').innerHTML='<div class=empty>движок ещё не писал состояние — запусти agents-hltrade-engine</div>';return;}
  $('mode').className='pill '+(s.live?'live':'dry');$('mode').textContent=s.live?'● LIVE':'DRY-RUN';
  $('sess').className='pill '+(s.in_session?'sess':'closed');$('sess').textContent=s.in_session?'СЕССИЯ':'вне сессии';
+ const gl=$('golive');gl.textContent=s.live?'● LIVE — выключить':'▶ ВКЛЮЧИТЬ БОЙ';gl.className=s.live?'btn-flat':'btn-play';
  const pb=$('pause');pb.textContent=s.paused?'▶ возобновить':'⏸ пауза';pb.className=s.paused?'btn-play':'btn-pause';
  $('clock').textContent='обновлено '+((Date.now()-s.ts_ms)/1000).toFixed(0)+'s · sec '+s.second;
 
@@ -167,6 +168,7 @@ async function refresh(){
   (tr.length?tr.slice(0,60).map(t=>`<tr><td class=num>${new Date(t.ts_ms).toLocaleTimeString()}</td><td>${t.symbol.split(':')[1]}</td><td class=${t.side=='buy'?'pos':(t.side=='sell'?'neg':'flat')}>${t.side}</td><td class=num>${f(t.size,4)}</td><td class=num>${f(t.price,3)}</td><td class=num>${money(t.notional)}</td><td class=flat>${t.result||t.kind}</td></tr>`).join(''):'<tr><td colspan=7 class=empty>сделок ещё нет</td></tr>');
  $('models').innerHTML=md.length?'<table><tr><th>время<th>corr<th>scale<th>rows<th>live</tr>'+md.slice(0,10).map(x=>`<tr><td class=num>${new Date(x.ts_ms).toLocaleTimeString()}</td><td class="num pos">${x.summary.val_corr}</td><td class=num>${x.summary.scale}</td><td class=num>${(x.summary.rows||0).toLocaleString()}</td><td class=num>${(x.summary.live_symbols||[]).length}</td></tr>`).join('')+'</table>':'<div class=empty>ретрейнов ещё нет<br><span style=font-size:11px>baseline из production_ensemble.pt</span></div>';
 }
+$('golive').onclick=()=>fetch('/api/state').then(r=>r.json()).then(s=>{if(s&&s.live){if(confirm('Выключить реальную торговлю (вернуться в dry-run)?'))post({live:false});}else if(confirm('⚠️ ВКЛЮЧИТЬ РЕАЛЬНУЮ ТОРГОВЛЮ на реальные деньги? Ордера пойдут на биржу Hyperliquid.'))post({live:true});});
 $('pause').onclick=()=>fetch('/api/state').then(r=>r.json()).then(s=>post({paused:!(s&&s.paused)}));
 $('flatall').onclick=()=>{if(confirm('Закрыть ВСЕ позиции?'))post({flatten:['ALL']})};
 setInterval(refresh,1000);refresh();addEventListener('resize',refresh);
