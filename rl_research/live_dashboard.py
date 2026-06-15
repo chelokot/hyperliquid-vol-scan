@@ -79,7 +79,7 @@ input[type=range]{width:90px;vertical-align:middle;accent-color:var(--blu)}
 <main>
  <div class=hero id=hero></div>
  <div class=row>
-  <div class=panel style=margin-bottom:0><h2>эквити</h2><canvas id=eq height=170></canvas></div>
+  <div class=panel style=margin-bottom:0><h2 id=eqtitle>эквити</h2><canvas id=eq height=170></canvas></div>
   <div class=panel style=margin-bottom:0><h2>модель / ретрейны</h2><div id=models></div></div>
  </div>
  <div class=panel><h2>управление · пары · бюджет · плечо</h2><div id=ctl></div></div>
@@ -139,12 +139,17 @@ async function refresh(){
  const open=Object.values(s.symbols||{}).filter(v=>Math.abs(v.szi)>1e-9).length;
  const expo=Object.values(s.symbols||{}).reduce((a,v)=>a+Math.abs((v.szi||0)*(v.perp||0)),0);
  const dexr=Object.entries(s.dex_equity||{}).map(([d,v])=>d+' '+money(v)).join(' · ')||'—';
+ const paper=s.paper_pnl||0, paperPct=eq?paper/eq*100:0;
+ const card2=s.live
+  ?`<div class=metric><div class=l>сессионный PnL · реал</div><div class="v num ${sgn(pnl)}">${pnl>=0?'+':''}${money(pnl)}</div><div class="s ${sgn(pnl)}">${pp>=0?'+':''}${f(pp)}% · paper ${paper>=0?'+':''}${money(paper)}</div></div>`
+  :`<div class=metric style="border-color:#3a3450;background:linear-gradient(180deg,#16131f,#0d0b14)"><div class=l>📝 виртуальный PnL · PAPER</div><div class="v num ${sgn(paper)}">${paper>=0?'+':''}${money(paper)}</div><div class="s ${sgn(paper)}">${paperPct>=0?'+':''}${f(paperPct)}% от эквити · «если бы торговал»</div></div>`;
  $('hero').innerHTML=`
   <div class=metric><div class=l>эквити (Σ dex)</div><div class="v num">${money(eq)}</div><div class=s>${dexr}${s.paused?' · ⏸ ПАУЗА':''}</div></div>
-  <div class=metric><div class=l>сессионный PnL</div><div class="v num ${sgn(pnl)}">${pnl>=0?'+':''}${money(pnl)}</div><div class="s ${sgn(pnl)}">${pp>=0?'+':''}${f(pp)}% · старт ${money(startEq)}</div></div>
+  ${card2}
   <div class=metric><div class=l>позиции / экспозиция</div><div class="v num">${open}<span style=color:var(--mut);font-size:16px> / ${Object.keys(s.symbols||{}).length}</span></div><div class=s num>${money(expo)} нотионал</div></div>
   <div class=metric><div class=l>модель</div><div class="v num">${md.length?'v'+md.length:'baseline'}</div><div class=s>scale ${md[0]?md[0].summary.scale:'?'} · corr ${md[0]?md[0].summary.val_corr:'?'}</div></div>`;
- line($('eq'),m.map(x=>x.equity).filter(x=>x>0),'#7aa2f7');
+ if(s.live){$('eqtitle').textContent='эквити (реал)';line($('eq'),m.map(x=>x.equity).filter(x=>x>0),'#7aa2f7');}
+ else{$('eqtitle').textContent='📝 виртуальная кривая PnL (paper), $';line($('eq'),m.map(x=>x.paper==null?0:x.paper),'#9ece6a');}
 
  // control panel: render once, then only when the symbol set / enabled / lev / weight changed (don't clobber edits)
  const sig=JSON.stringify(Object.entries(s.symbols||{}).map(([k,v])=>[k,v.enabled,v.leverage,v.weight]));
@@ -161,11 +166,12 @@ async function refresh(){
    <div class=kv><span class=k>perp / stock</span><span class=num>${f(v.perp,2)} / ${f(v.stock,2)}</span></div>
    <div class=kv><span class=k>премия</span><span class="num ${sgn(prem)}">${f(prem,3)}%</span></div>
    <div class=kv><span class=k>прогноз 60с</span><span class="num ${sgn(v.pred_bps)}">${f(v.pred_bps,2)} bps</span></div>
+   <div class=kv><span class=k>${s.live?'paper PnL':'paper PnL 📝'}</span><span class="num ${sgn(v.paper)}">${v.paper>=0?'+':''}${money(v.paper)}</span></div>
    <canvas height=30 data-sym="${k}"></canvas></div>`;}).join('');
  syms.forEach(([k])=>{const cv=document.querySelector(`canvas[data-sym="${k}"]`);if(cv)spark(cv,m.map(x=>x.syms&&x.syms[k]?x.syms[k].prem:null).filter(x=>x!=null),'#7dcfff');});
 
  $('trades').innerHTML='<tr><th>время<th>пара<th>сторона<th>размер<th>цена<th>нотионал<th>статус</tr>'+
-  (tr.length?tr.slice(0,60).map(t=>`<tr><td class=num>${new Date(t.ts_ms).toLocaleTimeString()}</td><td>${t.symbol.split(':')[1]}</td><td class=${t.side=='buy'?'pos':(t.side=='sell'?'neg':'flat')}>${t.side}</td><td class=num>${f(t.size,4)}</td><td class=num>${f(t.price,3)}</td><td class=num>${money(t.notional)}</td><td class=flat>${t.result||t.kind}</td></tr>`).join(''):'<tr><td colspan=7 class=empty>сделок ещё нет</td></tr>');
+  (tr.length?tr.slice(0,60).map(t=>`<tr><td class=num>${new Date(t.ts_ms).toLocaleTimeString()}</td><td>${t.symbol.split(':')[1]}</td><td class=${t.side=='buy'?'pos':(t.side=='sell'?'neg':'flat')}>${t.side}</td><td class=num>${f(t.size,4)}</td><td class=num>${f(t.price,3)}</td><td class=num>${money(t.notional)}</td><td class=flat>${t.live?(t.result||'live'):'📝 paper'}</td></tr>`).join(''):'<tr><td colspan=7 class=empty>сделок ещё нет</td></tr>');
  $('models').innerHTML=md.length?'<table><tr><th>время<th>corr<th>scale<th>rows<th>live</tr>'+md.slice(0,10).map(x=>`<tr><td class=num>${new Date(x.ts_ms).toLocaleTimeString()}</td><td class="num pos">${x.summary.val_corr}</td><td class=num>${x.summary.scale}</td><td class=num>${(x.summary.rows||0).toLocaleString()}</td><td class=num>${(x.summary.live_symbols||[]).length}</td></tr>`).join('')+'</table>':'<div class=empty>ретрейнов ещё нет<br><span style=font-size:11px>baseline из production_ensemble.pt</span></div>';
 }
 $('golive').onclick=()=>fetch('/api/state').then(r=>r.json()).then(s=>{if(s&&s.live){if(confirm('Выключить реальную торговлю (вернуться в dry-run)?'))post({live:false});}else if(confirm('⚠️ ВКЛЮЧИТЬ РЕАЛЬНУЮ ТОРГОВЛЮ на реальные деньги? Ордера пойдут на биржу Hyperliquid.'))post({live:true});});

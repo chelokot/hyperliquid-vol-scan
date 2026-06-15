@@ -121,6 +121,8 @@ class LiveEngine:
         self.streams = {s: FeatureStream(s) for s in self.symbols}
         self.member_positions = {s: None for s in self.symbols}
         self.local_szi = {s: 0.0 for s in self.symbols}
+        self.paper_pnl = {s: 0.0 for s in self.symbols}   # mark-to-market $ of the (virtual in dry-run) position, net of costs
+        self.paper_prev = {s: None for s in self.symbols}
         self.last_target = {s: 0.0 for s in self.symbols}
         self.last_pred = {s: 0.0 for s in self.symbols}
         self.symbol_notional: dict[str, float] = {}
@@ -277,6 +279,7 @@ class LiveEngine:
         if self.live:
             result = str(self.exchange.market_open(self.coin[symbol], is_buy, size).get("status"))
         self.local_szi[symbol] += size if is_buy else -size
+        self.paper_pnl[symbol] -= size * perp_price * (self.costs_bps[symbol] / 1e4)  # round-trip cost on this fill
         self.store.record_trade(symbol, "buy" if is_buy else "sell", size, perp_price, round(target_position, 3), round(size * perp_price, 2), "order", self.live, result)
         self.emit({"type": "order", "symbol": symbol, "side": "buy" if is_buy else "sell", "size": size, "perp": perp_price, "target_pos": round(target_position, 2), "live": self.live, "result": result})
 
@@ -367,12 +370,13 @@ class LiveEngine:
                 "szi": round(self.local_szi[s], 6),
                 "target": round(self.last_target.get(s, 0.0), 3),
             }
-        self.store.record_metric({"equity": round(equity, 2), "syms": syms})
+        self.store.record_metric({"equity": round(equity, 2), "paper": round(sum(self.paper_pnl.values()), 2), "syms": syms})
 
     def record_state(self, second: int, in_session: bool) -> None:
         self.store.record_state({
             "second": second, "in_session": in_session, "live": self.live, "paused": self.paused,
             "model_mtime": self.bundle_mtime, "dex_equity": self.last_dex_equity,
+            "paper_pnl": round(sum(self.paper_pnl.values()), 2),
             "symbols": {s: {
                 "target": round(self.last_target.get(s, 0.0), 3),
                 "szi": round(self.local_szi[s], 6),
@@ -384,6 +388,7 @@ class LiveEngine:
                 "enabled": self.enabled[s],
                 "leverage": self.leverage_live[s],
                 "weight": self.weight[s],
+                "paper": round(self.paper_pnl[s], 2),
             } for s in self.symbols},
         })
 
@@ -422,6 +427,10 @@ class LiveEngine:
                     self.streams[symbol].push_second(second, pl, pb, ps, pc, sl, sc)
                     if in_session:
                         self.store.record_bar(date, symbol, second, ts_ms, pl, pb, ps, pc, sl, sc)
+                    if pl is not None:  # mark-to-market the (virtual) position each second
+                        if self.paper_prev[symbol] is not None:
+                            self.paper_pnl[symbol] += self.local_szi[symbol] * (pl - self.paper_prev[symbol])
+                        self.paper_prev[symbol] = pl
                 if in_session:
                     self.store.commit()
                 if tradeable:

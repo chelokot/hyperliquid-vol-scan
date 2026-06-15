@@ -74,8 +74,8 @@ class LiveStore:
         c.commit()
 
     def recent_trades(self, limit=200):
-        cur = self._conn().execute("SELECT ts_ms,symbol,side,size,price,target,notional,kind,result FROM trades ORDER BY ts_ms DESC LIMIT ?", (limit,))
-        cols = ["ts_ms", "symbol", "side", "size", "price", "target", "notional", "kind", "result"]
+        cur = self._conn().execute("SELECT ts_ms,symbol,side,size,price,target,notional,kind,result,live FROM trades ORDER BY ts_ms DESC LIMIT ?", (limit,))
+        cols = ["ts_ms", "symbol", "side", "size", "price", "target", "notional", "kind", "result", "live"]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
     # ---- state snapshot (dashboard) ----
