@@ -1,7 +1,10 @@
 account_address: "0xYOUR_MAIN_ACCOUNT_ADDRESS"
-symbols: ["cash:HOOD", "cash:NVDA", "cash:TSLA", "cash:META", "cash:GOOGL", "cash:AMZN", "cash:MSFT", "xyz:ARM", "xyz:MSTR", "xyz:PLTR"]
+# pool of candidate pairs (feeds + features run for all; the dashboard toggles which trade)
+symbols: ["cash:INTC", "cash:HOOD", "cash:NVDA", "cash:TSLA", "cash:META", "cash:GOOGL", "cash:AMZN", "cash:MSFT", "xyz:ARM", "xyz:MSTR", "xyz:PLTR"]
+enabled: ["cash:INTC", "cash:HOOD", "xyz:ARM"]   # default traded set (editable live in the dashboard)
 leverage:
-  "cash:HOOD": 10
+  "cash:INTC": 20
+  "cash:HOOD": 20
   "cash:NVDA": 20
   "cash:TSLA": 20
   "cash:META": 20

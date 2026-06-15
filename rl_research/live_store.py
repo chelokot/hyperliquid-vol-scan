@@ -32,6 +32,7 @@ class LiveStore:
               target REAL, notional REAL, kind TEXT, live INTEGER, result TEXT);
             CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY CHECK(id=1), ts_ms INTEGER, payload TEXT);
             CREATE TABLE IF NOT EXISTS metrics(ts_ms INTEGER PRIMARY KEY, payload TEXT);
+            CREATE TABLE IF NOT EXISTS control(id INTEGER PRIMARY KEY CHECK(id=1), ts_ms INTEGER, payload TEXT);
             CREATE TABLE IF NOT EXISTS models(ts_ms INTEGER, path TEXT, summary TEXT);
             """
         )
@@ -91,6 +92,17 @@ class LiveStore:
         data = json.loads(row[1])
         data["ts_ms"] = row[0]
         return data
+
+    # ---- control (dashboard -> engine) ----
+    def get_control(self) -> dict | None:
+        cur = self._conn().execute("SELECT payload FROM control WHERE id=1")
+        row = cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    def set_control(self, payload: dict) -> None:
+        c = self._conn()
+        c.execute("INSERT OR REPLACE INTO control VALUES(1,?,?)", (int(time.time() * 1000), json.dumps(payload)))
+        c.commit()
 
     # ---- metrics time-series (charts) ----
     def record_metric(self, payload: dict) -> None:

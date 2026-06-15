@@ -44,6 +44,7 @@ HOTSWAP_CHECK_SEC = 15
 class EngineConfig:
     account_address: str
     leverage: dict[str, int]
+    enabled: list[str] | None = None  # which pool symbols trade by default (None = all)
     base_url: str = "https://api.hyperliquid.xyz"
     secret_key_env: str = "HYPERLIQUID_SECRET_KEY"
     finnhub_key_env: str = "FINNHUB_API_KEY"
@@ -123,6 +124,12 @@ class LiveEngine:
         self.last_pred = {s: 0.0 for s in self.symbols}
         self.symbol_notional: dict[str, float] = {}
         self.last_dex_equity: dict[str, float] = {}
+        # live-editable control state (overridden from the store by the dashboard)
+        default_enabled = set(config.enabled) if config.enabled is not None else set(self.symbols)
+        self.enabled = {s: s in default_enabled for s in self.symbols}
+        self.leverage_live = {s: int(config.leverage.get(s, 5)) for s in self.symbols}
+        self.weight = {s: 1.0 for s in self.symbols}
+        self.paused = False
         self.events_path = Path(config.events_path)
         self.events_path.parent.mkdir(parents=True, exist_ok=True)
         self.store = LiveStore()
@@ -177,15 +184,25 @@ class LiveEngine:
                 for symbol in self.symbols:
                     if self.coin[symbol] == coin:
                         self.local_szi[symbol] = float(asset_position["position"]["szi"])
-        dex_counts = {dex: sum(1 for s in self.symbols if self.dex[s] == dex) for dex in dex_equity}
-        shares = {}
-        for dex, equity in dex_equity.items():
-            if equity == 0.0 and not self.live:
-                equity = 14.0 * dex_counts[dex]
-            shares[dex] = equity * self.config.budget_safety / dex_counts[dex]
-        self.symbol_notional = {s: shares[self.dex[s]] * self.config.leverage[s] for s in self.symbols}
+        self._dex_equity = dex_equity
         self.last_dex_equity = {d: round(e, 2) for d, e in dex_equity.items()}
-        self.emit({"type": "account", "dex_equity": self.last_dex_equity, "share_margin": {d: round(s, 2) for d, s in shares.items()}})
+        self._recompute_notional()
+        self.emit({"type": "account", "dex_equity": self.last_dex_equity})
+
+    def _recompute_notional(self) -> None:
+        # each dex's equity split across its ENABLED symbols by weight, then leverage
+        eq = getattr(self, "_dex_equity", {})
+        dexes = set(self.dex.values())
+        dex_weight = {d: sum(self.weight[s] for s in self.symbols if self.dex[s] == d and self.enabled[s]) for d in dexes}
+        self.symbol_notional = {}
+        for s in self.symbols:
+            d = self.dex[s]
+            equity = eq.get(d, 0.0)
+            if equity == 0.0 and not self.live:
+                equity = 14.0 * sum(1 for x in self.symbols if self.dex[x] == d)  # nominal for dry-run preview
+            wsum = dex_weight[d]
+            share = (equity * self.config.budget_safety * self.weight[s] / wsum) if (self.enabled[s] and wsum > 0) else 0.0
+            self.symbol_notional[s] = share * self.leverage_live[s]
 
     # ---- websocket feeds ----
     def start_perp_feed(self) -> None:
@@ -238,8 +255,15 @@ class LiveEngine:
         return float(np.mean(votes))
 
     def reconcile(self, symbol: str, target_position: float, perp_price: float) -> None:
+        if not self.enabled[symbol]:
+            target_position = 0.0  # disabled -> close & stay out
         target_notional = target_position * self.symbol_notional.get(symbol, 0.0)
         current_notional = self.local_szi[symbol] * perp_price
+        if self.paused:  # reduce-only: never increase exposure or flip while paused
+            if target_notional * current_notional < 0:
+                target_notional = 0.0
+            elif abs(target_notional) > abs(current_notional):
+                target_notional = current_notional
         delta = target_notional - current_notional
         threshold = max(self.config.min_order_notional_usd, self.config.rebalance_fraction * self.symbol_notional.get(symbol, 0.0))
         if abs(delta) < threshold:
@@ -255,17 +279,54 @@ class LiveEngine:
         self.store.record_trade(symbol, "buy" if is_buy else "sell", size, perp_price, round(target_position, 3), round(size * perp_price, 2), "order", self.live, result)
         self.emit({"type": "order", "symbol": symbol, "side": "buy" if is_buy else "sell", "size": size, "perp": perp_price, "target_pos": round(target_position, 2), "live": self.live, "result": result})
 
+    def flatten_symbol(self, symbol: str, reason: str) -> None:
+        if abs(self.local_szi[symbol]) < 1e-9:
+            return
+        result = ""
+        if self.live:
+            result = str(self.exchange.market_close(self.coin[symbol]).get("status"))
+        self.store.record_trade(symbol, "close", self.local_szi[symbol], self.bars[symbol].perp_last or 0.0, 0.0, 0.0, "flatten", self.live, result)
+        self.emit({"type": "flatten", "symbol": symbol, "szi": self.local_szi[symbol], "reason": reason, "live": self.live})
+        self.local_szi[symbol] = 0.0
+        self.member_positions[symbol] = None
+
     def flatten_all(self, reason: str) -> None:
         for symbol in self.symbols:
-            if abs(self.local_szi[symbol]) < 1e-9:
+            self.flatten_symbol(symbol, reason)
+
+    # ---- live control from the dashboard (via the store) ----
+    def default_control(self) -> dict:
+        return {"paused": False, "flatten": [], "symbols": {
+            s: {"enabled": self.enabled[s], "leverage": self.leverage_live[s], "weight": self.weight[s]} for s in self.symbols}}
+
+    def apply_control(self) -> None:
+        ctrl = self.store.get_control()
+        if not ctrl:
+            self.store.set_control(self.default_control())
+            return
+        self.paused = bool(ctrl.get("paused", False))
+        for s in self.symbols:
+            cs = (ctrl.get("symbols") or {}).get(s)
+            if not cs:
                 continue
-            result = ""
-            if self.live:
-                result = str(self.exchange.market_close(self.coin[symbol]).get("status"))
-            self.store.record_trade(symbol, "close", self.local_szi[symbol], self.bars[symbol].perp_last or 0.0, 0.0, 0.0, "flatten", self.live, result)
-            self.emit({"type": "flatten", "symbol": symbol, "szi": self.local_szi[symbol], "reason": reason, "live": self.live})
-            self.local_szi[symbol] = 0.0
-            self.member_positions[symbol] = None
+            self.enabled[s] = bool(cs.get("enabled", True))
+            self.weight[s] = max(0.0, float(cs.get("weight", 1.0)))
+            new_lev = int(cs.get("leverage", self.leverage_live[s]))
+            if new_lev != self.leverage_live[s]:
+                self.leverage_live[s] = new_lev
+                if self.live:
+                    try:
+                        self.exchange.update_leverage(new_lev, self.coin[s], is_cross=True)
+                    except Exception as exc:
+                        self.emit({"type": "leverage_error", "symbol": s, "requested": new_lev, "error": str(exc)})
+        flat = ctrl.get("flatten") or []
+        if flat:
+            targets = self.symbols if "ALL" in flat else [s for s in flat if s in self.symbols]
+            for s in targets:
+                self.flatten_symbol(s, "manual")
+            ctrl["flatten"] = []
+            self.store.set_control(ctrl)
+        self._recompute_notional()
 
     # ---- hot-swap ----
     def maybe_hotswap(self) -> None:
@@ -297,7 +358,7 @@ class LiveEngine:
 
     def record_state(self, second: int, in_session: bool) -> None:
         self.store.record_state({
-            "second": second, "in_session": in_session, "live": self.live,
+            "second": second, "in_session": in_session, "live": self.live, "paused": self.paused,
             "model_mtime": self.bundle_mtime, "dex_equity": self.last_dex_equity,
             "symbols": {s: {
                 "target": round(self.last_target.get(s, 0.0), 3),
@@ -307,6 +368,9 @@ class LiveEngine:
                 "pred_bps": round(self.last_pred.get(s, 0.0), 3),
                 "notional": round(self.symbol_notional.get(s, 0.0), 2),
                 "ready": self.streams[s].ready(),
+                "enabled": self.enabled[s],
+                "leverage": self.leverage_live[s],
+                "weight": self.weight[s],
             } for s in self.symbols},
         })
 
@@ -315,6 +379,9 @@ class LiveEngine:
         return int(time.time()) % 86400 - RTH_START_UTC
 
     def run(self) -> None:
+        if self.store.get_control() is None:
+            self.store.set_control(self.default_control())
+        self.apply_control()
         self.refresh_account()
         self.warmup_from_store()
         if self.live:
@@ -338,8 +405,9 @@ class LiveEngine:
             in_session = 0 <= second < SECONDS
             tradeable = in_session and second < SECONDS - FLATTEN_BEFORE_CLOSE_SEC
 
-            # 1 Hz: roll bars -> persist -> features -> hysteresis decision
+            # 1 Hz: control -> roll bars -> persist -> features -> hysteresis decision
             if second != last_second:
+                self.apply_control()
                 date = self.today()
                 ts_ms = int(time.time() * 1000)
                 for symbol in self.symbols:
